@@ -34,6 +34,10 @@ Native Hermes delegation normally creates Hermes child agents. This project aims
 
 Dashboard, marketplace admission, broad multi-CLI/OS claims, automatic write-task replay, private credential discovery, unattended permission bypass and autonomous publishing of runtime artifacts.
 
+## Current gate outcome
+
+The [compatibility report](COMPATIBILITY.md) records the executed host probes and independent live AGY smoke. Default takeover is blocked on the audited revision. No production plugin has been implemented or installed; narrowing the release to standalone tools requires an explicit owner decision.
+
 ## Release policy
 
 Implementation, automated verification, live CLI verification and release readiness are separate states. A blocker at a required gate is reported explicitly. Publishing this research repository does not imply a release or catalog admission.

@@ -2,7 +2,7 @@
 
 A plugin-only integration project for delegating Hermes work to external agent CLIs instead of changing the model of a native Hermes child.
 
-**Status: compatibility research and implementation in progress. Not a released plugin.** No support claim is made until real dispatch, authorization, process supervision and external CLI tests pass. See [the product requirements](docs/PRD.md).
+**Status: research prototype; transparent native-delegation replacement is blocked on the audited Hermes revision. Not an installable or released plugin.** Eight host behavior probes and an independently repeated AGY smoke check establish what works and what does not. See [the compatibility report](docs/COMPATIBILITY.md) and [the product requirements](docs/PRD.md).
 
 ## Goal
 
@@ -16,7 +16,7 @@ Keep Hermes as the orchestrator while an external CLI owns the delegated agent l
 - Exercise real artifacts independently; fixture tests are not evidence of a live vendor run.
 - Disclose unsupported behavior instead of silently using native delegation.
 
-Hermes execution middleware is documented as fail-open. Strict no-fallback behavior and native subagent UI/lifecycle parity are **not currently guaranteed**. The project will not hide these limitations behind a wrapper.
+The audited middleware runs outside the downstream authorization callback. Short-circuiting skips those checks; continuing preserves them but reaches the native callback. Execution middleware also falls through on certain exceptions. **Default takeover is therefore disabled, not experimentally installed.** Native subagent UI/lifecycle parity is not claimed. The project will not hide these limitations behind a wrapper.
 
 ## Development principles
 
