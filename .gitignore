@@ -18,3 +18,11 @@ logs/
 .DS_Store
 .integration-root
 scratch/
+# Local research artifacts, not publication inputs.
+research/evidence/
+research/AGY_FAILURE_DIAGNOSTICS_REPORT.md
+research/verify_failure_diagnostics_ephemeral.py
+research/verify_provider_failure_classification.py
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm

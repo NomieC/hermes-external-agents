@@ -10,6 +10,42 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class BackendTests(unittest.TestCase):
+    def test_status_cli_is_read_only_and_requires_child_ownership(self):
+        import argparse
+        import contextlib
+        import io
+        import json
+        from unittest.mock import patch
+        from types import SimpleNamespace
+        spec = importlib.util.spec_from_file_location("hea_backend_cli_test", ROOT / "backend.py")
+        assert spec and spec.loader
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        registered = []
+        ctx = SimpleNamespace(get_config=lambda key, default=None: default,
+            register_delegation_provider=lambda provider: None,
+            register_cli_command=lambda **kwargs: registered.append(kwargs))
+        module.register(ctx)
+        self.assertEqual(registered[0]["name"], "external-agents")
+        parser = argparse.ArgumentParser()
+        registered[0]["setup_fn"](parser)
+        args = parser.parse_args(["status", "--job", "a" * 32, "--session", "child-one"])
+        calls = []
+        client = SimpleNamespace(job_status=lambda token, session: calls.append((token, session)) or
+            {"token": token, "session": session, "state": "failed", "error_code": "timeout"},
+            close=lambda: calls.append("closed"))
+        output = io.StringIO()
+        with patch("providers.get_provider_profile", return_value=SimpleNamespace(create_client=lambda: client)):
+            with contextlib.redirect_stdout(output):
+                registered[0]["handler_fn"](args)
+        self.assertEqual(json.loads(output.getvalue())["error_code"], "timeout")
+        self.assertEqual(calls, [("a" * 32, "child-one"), "closed"])
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            parser.parse_args(["status", "--job", "a" * 32])
+        with patch("providers.get_provider_profile", return_value=SimpleNamespace(create_client=lambda: None)):
+            with self.assertRaisesRegex(SystemExit, "unavailable"):
+                registered[0]["handler_fn"](args)
+
     def test_nonlocal_terminal_policy_refuses_local_external_execution(self):
         spec = importlib.util.spec_from_file_location("hea_backend_policy_test", ROOT / "backend.py")
         assert spec is not None and spec.loader is not None

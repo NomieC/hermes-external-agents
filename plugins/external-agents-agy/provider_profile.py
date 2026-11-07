@@ -14,8 +14,12 @@ def load_client_class():
 
 
 def terminal_error(error, **context):
-    return {"reason": "format_error", "retryable": False, "should_fallback": False,
-            "should_rotate_credential": False, "message": "External Agents stopped; automatic replay is disabled."}
+    # Keep terminal classification without mislabelling process failures as HTTP 400s.
+    code = getattr(error, "code", "execution_failed")
+    reason = "timeout" if code == "timeout" else "incomplete_response"
+    return {"reason": reason, "retryable": False, "should_fallback": False,
+            "should_rotate_credential": False, "message": "External Agents stopped; automatic replay is disabled.",
+            "error_context": {"external_agent_code": code}}
 
 
 class UnavailableClient:

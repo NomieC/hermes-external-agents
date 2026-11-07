@@ -69,6 +69,47 @@ class ClientTests(unittest.TestCase):
             self.assertIn("wrapper working-directory metadata does not change this path", prompts[0])
             self.assertIn("Do not circumvent denied actions", prompts[0])
 
+    def test_host_output_contract_is_forwarded_without_plain_text_conflict(self):
+        from hea_runtime.client import AGYClient
+        captured = []
+
+        class Runner:
+            def __init__(self, config):
+                captured.append(config)
+
+            def run(self, prompt):
+                captured.append(prompt)
+                return SimpleNamespace(response='{"ok":true}', status="SUCCESS", returncode=0)
+
+            def close(self):
+                pass
+
+        schema = {"type": "object", "required": ["ok"], "properties": {"ok": {"type": "boolean"}}}
+        import json
+        with tempfile.TemporaryDirectory() as root:
+            client = AGYClient(workspace=root, data_dir=Path(root) / "private",
+                settings={"allow_external_tools": True}, runner_factory=Runner)
+            client.chat.completions.create(messages=[{"role": "system", "content":
+                "Task context\nOUTPUT CONTRACT (machine-validated):\n"
+                "Your FINAL response must be ONLY the JSON value that validates against this JSON Schema.\n" +
+                json.dumps(schema)}], extra_body={"hea_job": "4" * 32, "hea_session": "one"})
+            self.assertEqual(getattr(captured[0], "json_schema", None), schema)
+            self.assertNotIn("Return your final report as plain text", captured[1])
+            self.assertIn("JSON", captured[1])
+
+    def test_response_format_contract_is_in_prompt_even_without_vendor_schema_support(self):
+        from hea_runtime.client import AGYClient
+        schema = {"type": "array", "items": {"type": "integer"}}
+        import json
+        prompt = AGYClient._prompt([{"role": "user", "content": "Return numbers"}], "/workspace", schema)
+        self.assertIn(json.dumps(schema, ensure_ascii=False), prompt)
+        self.assertEqual(AGYClient._output_schema([], {"type": "json_schema", "json_schema": {"schema": schema}}), schema)
+
+    def test_malformed_response_format_fails_closed_before_runner(self):
+        from hea_runtime.client import AGYClient, ClientError
+        with self.assertRaises(ClientError):
+            AGYClient._output_schema([], {"type": "json_schema", "json_schema": None})
+
     def test_route_settings_reach_runner_without_enabling_direct_use(self):
         from hea_runtime.client import AGYClient, ClientError
         configurations = []
@@ -121,6 +162,47 @@ class ClientTests(unittest.TestCase):
                     AGYClient(**options).chat.completions.create(**request)
             self.assertEqual(len(launches), 1)
 
+    def test_timeout_diagnostic_and_conversation_survive_retry_without_relaunch(self):
+        from hea_runtime.client import AGYClient, ClientError
+        from hea_runtime.runner import AGYError
+        launches = []
+        cid = "12345678-1234-4234-8234-123456789abc"
+
+        class Runner:
+            conversation_id = cid
+            duration_seconds = 2.0
+
+            def __init__(self, config):
+                self.config = config
+
+            def run(self, prompt):
+                launches.append(prompt)
+                self.config.event_callback({"event": "init", "conversation_id": cid})
+                raise AGYError("AGY run timed out", "timeout")
+
+            def close(self):
+                pass
+
+        with tempfile.TemporaryDirectory() as root:
+            options = dict(workspace=root, data_dir=Path(root) / "private",
+                           settings={"allow_external_tools": True}, runner_factory=Runner)
+            request = dict(messages=[{"role": "user", "content": "Task"}],
+                           extra_body={"hea_job": "5" * 32, "hea_session": "owner"})
+            for _ in range(2):
+                client = AGYClient(**options)
+                with self.assertRaises(ClientError) as caught:
+                    client.chat.completions.create(**request)
+                self.assertEqual(getattr(caught.exception, "code", None), "timeout")
+                self.assertIn("timed out", str(caught.exception))
+            self.assertEqual(len(launches), 1)
+            record = client.job_status("5" * 32, "owner")
+            self.assertEqual(record["conversation_id"], cid)
+            self.assertEqual(record["error_code"], "timeout")
+            self.assertEqual(record["state"], "failed")
+            self.assertIn(cid, record["resume_command"])
+            with self.assertRaisesRegex(ClientError, "another child session"):
+                client.job_status("5" * 32, "intruder")
+
     def test_runner_failure_does_not_disclose_underlying_exception(self):
         from hea_runtime.client import AGYClient, ClientError
         class BrokenRunner:
@@ -135,6 +217,55 @@ class ClientTests(unittest.TestCase):
                     extra_body={"hea_job": "2" * 32, "hea_session": "one"})
             self.assertIsNone(caught.exception.__cause__)
             self.assertTrue(caught.exception.__suppress_context__)
+
+    def test_cancellation_is_durable_terminal_and_not_replayed(self):
+        from hea_runtime.client import AGYClient, ClientError
+        from hea_runtime.runner import AGYError
+        launches = []
+        class Runner:
+            def __init__(self, config):
+                pass
+            def run(self, prompt):
+                launches.append(prompt)
+                raise AGYError("AGY run cancelled", "cancelled")
+            def close(self):
+                pass
+        with tempfile.TemporaryDirectory() as root:
+            options = dict(workspace=root, data_dir=Path(root) / "private",
+                settings={"allow_external_tools": True}, runner_factory=Runner)
+            request = dict(messages=[{"role": "user", "content": "Task"}],
+                extra_body={"hea_job": "6" * 32, "hea_session": "owner"})
+            for _ in range(2):
+                client = AGYClient(**options)
+                with self.assertRaises(ClientError) as caught:
+                    client.chat.completions.create(**request)
+                self.assertEqual(caught.exception.code, "cancelled")
+            self.assertEqual(len(launches), 1)
+            record_client = AGYClient(**options)
+            self.assertEqual(record_client.job_status("6" * 32, "owner")["error_code"], "cancelled")
+
+    def test_cancel_race_after_result_keeps_cancelled_code(self):
+        from hea_runtime.client import AGYClient, ClientError
+        client = None
+        class Runner:
+            def __init__(self, config):
+                pass
+            def run(self, prompt):
+                assert client is not None
+                client.cancel()
+                return SimpleNamespace(response="done", status="SUCCESS", returncode=0)
+            def cancel(self):
+                pass
+            def close(self):
+                pass
+        with tempfile.TemporaryDirectory() as root:
+            client = AGYClient(workspace=root, data_dir=Path(root) / "private",
+                settings={"allow_external_tools": True}, runner_factory=Runner)
+            with self.assertRaises(ClientError) as caught:
+                client.chat.completions.create(messages=[{"role": "user", "content": "Task"}],
+                    extra_body={"hea_job": "7" * 32, "hea_session": "owner"})
+            self.assertEqual(caught.exception.code, "cancelled")
+            self.assertEqual(client.job_status("7" * 32, "owner")["error_code"], "cancelled")
 
     def test_storage_context_closes_database_connection(self):
         import sqlite3

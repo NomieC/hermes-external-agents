@@ -1,0 +1,28 @@
+name: Bug report
+description: Report a reproducible issue without private task data.
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: "Do not upload .env, config, jobs databases, tokens, raw logs or private prompts. For vulnerabilities use SECURITY.md."
+  - type: input
+    id: versions
+    attributes:
+      label: Versions and platform
+      description: Hermes version/revision, AGY version, plugin commit, OS and architecture.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Minimal trusted reproduction
+      description: Sanitized steps in a disposable workspace, expected result and actual result.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Sanitized outcome
+      description: Exact command exit/status and safe error code only. State whether this was a fixture test or real AGY execution. Do not replay a mutating job for a report.
+    validations:
+      required: true

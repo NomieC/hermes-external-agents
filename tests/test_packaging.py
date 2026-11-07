@@ -26,6 +26,13 @@ class PackagingTests(unittest.TestCase):
             self.assertFalse(any(output.rglob("__pycache__")))
             for registration in (backend, provider):
                 self.assertEqual((registration / "LICENSE").read_text(), (ROOT / "LICENSE").read_text())
+                manifest = (registration / "plugin.yaml").read_text()
+                self.assertIn('version: 0.2.0', manifest)
+                self.assertIn('requires_hermes: ">=0.22.5"', manifest)
+                readme = (registration / "README.md").read_text()
+                self.assertIn("Both registrations", readme)
+                self.assertIn("not a security sandbox", readme)
+                self.assertIn("../../README.md", readme)
             self.assertEqual((backend / "__init__.py").read_bytes(), (ROOT / "backend.py").read_bytes())
             self.assertEqual((provider / "provider_profile.py").read_bytes(), (ROOT / "provider_profile.py").read_bytes())
             for filename in ("client.py", "runner.py"):

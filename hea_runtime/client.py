@@ -6,10 +6,13 @@ are not a sandbox for that external agent. This adapter requires explicit consen
 from __future__ import annotations
 
 from contextlib import contextmanager
+import json
 import os
 import re
 import sqlite3
 import threading
+import shlex
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -17,6 +20,10 @@ from typing import Any
 
 class ClientError(RuntimeError):
     """A terminal, non-replayable external-agent request error."""
+
+    def __init__(self, message, code="execution_failed"):
+        super().__init__(message)
+        self.code = code
 
 
 def _default_runner(config):
@@ -57,14 +64,73 @@ class AGYClient:
             with db:
                 db.execute("CREATE TABLE IF NOT EXISTS jobs (token TEXT PRIMARY KEY, session TEXT NOT NULL, "
                            "state TEXT NOT NULL, response TEXT)")
+                db.execute("CREATE TABLE IF NOT EXISTS job_details (token TEXT PRIMARY KEY, "
+                           "workspace TEXT, executable TEXT, conversation_id TEXT, error_code TEXT, "
+                           "error_message TEXT, duration_seconds REAL, progress TEXT)")
                 yield db
         finally:
             db.close()
 
+    def job_status(self, token, session):
+        """Owner-bound diagnostic lookup; never returns prompts or cached response text."""
+        with self._database() as db:
+            row = db.execute("SELECT session,state FROM jobs WHERE token=?", (token,)).fetchone()
+            if not row:
+                raise ClientError("Unknown external-agent job.")
+            if row[0] != session:
+                raise ClientError("External-agent job belongs to another child session.")
+            details = db.execute("SELECT workspace,executable,conversation_id,error_code,error_message,"
+                                 "duration_seconds,progress FROM job_details WHERE token=?", (token,)).fetchone()
+        result = dict(token=token, session=session, state=row[1])
+        if details:
+            result.update(zip(("workspace", "executable", "conversation_id", "error_code", "error_message",
+                               "duration_seconds", "progress"), details))
+            result["progress"] = json.loads(result["progress"] or "{}")
+            if result["conversation_id"]:
+                result["resume_command"] = ("cd " + shlex.quote(result["workspace"]) + " && " +
+                    shlex.join([result["executable"], "--mode", "plan", "--conversation", result["conversation_id"]]))
+        return result
+
+    def _progress(self, token, session, progress):
+        with self._database() as db:
+            db.execute("UPDATE job_details SET conversation_id=COALESCE(?,conversation_id),progress=? "
+                       "WHERE token=? AND EXISTS (SELECT 1 FROM jobs WHERE token=? AND session=?)",
+                       (progress.get("conversation_id"), json.dumps(progress), token, token, session))
+
     @staticmethod
-    def _prompt(messages, workspace):
+    def _output_schema(messages, response_format=None):
+        # Public text contract appended by Hermes. The routing interface does not
+        # expose output_schema; never reach into a live child's private attributes.
+        if isinstance(response_format, dict) and response_format.get("type") == "json_schema":
+            description = response_format.get("json_schema")
+            schema = description.get("schema") if isinstance(description, dict) else None
+            if not isinstance(schema, dict):
+                raise ClientError("Cannot read the requested JSON output contract; no execution was attempted.")
+            return schema
+        marker = "OUTPUT CONTRACT (machine-validated):\n"
+        for message in messages or []:
+            if not isinstance(message, dict) or message.get("role") != "system":
+                continue
+            content = message.get("content")
+            if not isinstance(content, str) or marker not in content:
+                continue
+            tail = content.rsplit(marker, 1)[1]
+            for match in re.finditer(r"(?m)^\s*\{", tail):
+                try:
+                    schema, _ = json.JSONDecoder().raw_decode(tail[match.start():].lstrip())
+                except ValueError:
+                    continue
+                if isinstance(schema, dict):
+                    return schema
+            raise ClientError("Cannot read the host JSON output contract; no execution was attempted.")
+        return None
+
+    @staticmethod
+    def _prompt(messages, workspace, schema=None):
+        output = ("Return ONLY a JSON value satisfying the supplied output contract, with no prose or fences. "
+                  if schema is not None else "Return your final report as plain text. ")
         parts = ["You are the external AGY worker for a Hermes delegated task. "
-                 "Use your own available tools to complete the task. Return your final report as plain text. "
+                 "Use your own available tools to complete the task. " + output +
                  "Do not emit Hermes tool-call blocks or ask Hermes to repeat actions you already took. "
                  "Do not circumvent denied actions; report missing permissions and stop.\n"
                  f"Execution workspace: {workspace}\n"
@@ -72,6 +138,8 @@ class AGYClient:
                  "wrapper working-directory metadata does not change this path. "
                  "Resolve task-relative paths here unless the task supplies another explicit path."]
 
+        if schema is not None:
+            parts.append("JSON output schema: " + json.dumps(schema, ensure_ascii=False))
         for message in messages or []:
             if not isinstance(message, dict):
                 raise ClientError("External Agents accepts text-only messages.")
@@ -125,7 +193,8 @@ class AGYClient:
             raise ClientError("Missing trusted delegation job token; direct model use is unsupported.")
         if not isinstance(session, str) or not session or len(session) > 256:
             raise ClientError("Missing child session identity.")
-        prompt = self._prompt(messages, workspace)
+        schema = self._output_schema(messages, kwargs.get("response_format"))
+        prompt = self._prompt(messages, workspace, schema)
         with self._database() as db:
             db.execute("BEGIN IMMEDIATE")
             row = db.execute("SELECT session,state,response FROM jobs WHERE token=?", (token,)).fetchone()
@@ -134,14 +203,21 @@ class AGYClient:
                     raise ClientError("External-agent job belongs to another child session.")
                 if row[1] == "completed":
                     return self._completion(row[2], model)
+                details = db.execute("SELECT error_code,error_message FROM job_details WHERE token=?", (token,)).fetchone()
+                if details and details[1]:
+                    raise ClientError(details[1], details[0] or "execution_failed")
                 raise ClientError("External-agent job already started or failed; automatic replay is refused.")
             db.execute("INSERT INTO jobs(token,session,state) VALUES(?,?,'started')", (token, session))
+            db.execute("INSERT INTO job_details(token,workspace,executable) VALUES(?,?,?)",
+                       (token, workspace, settings.get("executable", "agy")))
         config = SimpleNamespace(command=settings.get("executable", "agy"), workspace=workspace,
                                  mode=settings.get("mode", "plan"),
                                  timeout_seconds=settings.get("timeout_seconds", 180),
                                  max_output_bytes=settings.get("max_output_bytes", 4_000_000),
-                                 model="" if model == "agy-default" else model)
+                                 model="" if model == "agy-default" else model, json_schema=schema,
+                                 event_callback=lambda event: self._progress(token, session, event))
         runner = None
+        started = time.monotonic()
         try:
             runner = self.runner_factory(config)
             with self._runner_lock:
@@ -150,19 +226,29 @@ class AGYClient:
                     runner.cancel()
             result = runner.run(prompt)
             if self._cancelled.is_set():
-                raise ClientError("External-agent task was cancelled; automatic replay is refused.")
+                raise ClientError("External-agent task was cancelled; automatic replay is refused.", "cancelled")
             if (result.status != "SUCCESS" or result.returncode != 0 or
                     not isinstance(result.response, str) or not result.response.strip()):
                 raise ClientError("External agent did not return a successful terminal result.")
             with self._database() as db:
                 db.execute("UPDATE jobs SET state='completed', response=? WHERE token=?", (result.response, token))
+            with self._database() as db:
+                db.execute("UPDATE job_details SET duration_seconds=? WHERE token=?",
+                           (time.monotonic() - started, token))
             return self._completion(result.response, model)
         except Exception as error:
+            from .runner import AGYError
+            code = error.code if isinstance(error, (ClientError, AGYError)) else "execution_failed"
+            messages = {"timeout": "AGY run timed out; actions may already have run. Automatic replay is refused.",
+                        "cancelled": "AGY run cancelled; actions may already have run. Automatic replay is refused.",
+                        "output_limit": "AGY output exceeded its limit. Automatic replay is refused.",
+                        "protocol_error": "AGY returned invalid stream metadata. Automatic replay is refused."}
+            message = messages.get(code, "External AGY execution failed; no automatic replay. Check CLI login and plugin settings.")
             with self._database() as db:
                 db.execute("UPDATE jobs SET state='failed' WHERE token=?", (token,))
-            if isinstance(error, ClientError):
-                raise
-            raise ClientError("External AGY execution failed; no automatic replay. Check CLI login and plugin settings.") from None
+                db.execute("UPDATE job_details SET error_code=?,error_message=?,duration_seconds=? WHERE token=?",
+                           (code, message, time.monotonic() - started, token))
+            raise ClientError(message, code) from None
         finally:
             with self._runner_lock:
                 self._active = None

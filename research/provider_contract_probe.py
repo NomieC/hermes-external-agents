@@ -51,6 +51,43 @@ class ProviderContractProbe(unittest.TestCase):
             finally:
                 agent.close()
 
+    def test_host_timeout_is_terminal_without_malformed_diagnosis(self):
+        module = self.profile_module()
+        from hea_runtime.client import AGYClient
+        from hea_runtime.runner import AGYError
+        launches = []
+
+        class FixtureRunner:
+            def __init__(self, config):
+                pass
+            def run(self, prompt):
+                launches.append(prompt)
+                raise AGYError("AGY run timed out", "timeout")
+            def close(self):
+                pass
+            def cancel(self):
+                pass
+
+        class FixtureClient(AGYClient):
+            def __init__(self, **kwargs):
+                super().__init__(runner_factory=FixtureRunner, **kwargs)
+
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as workspace:
+            body = {"hea_job": "8" * 32, "hea_workspace": workspace,
+                    "hea_settings": {"allow_external_tools": True}}
+            with patch.object(module, "load_client_class", return_value=FixtureClient):
+                agent = self.agent(workspace, request_overrides={"extra_body": body})
+                try:
+                    result = agent.run_conversation("No actual vendor execution in this fixture.")
+                    self.assertTrue(result.get("failed"))
+                    self.assertEqual(result.get("failure_reason"), "timeout")
+                    self.assertIs(result.get("failure_retryable"), False)
+                    self.assertIn("timed out", result["error"])
+                    self.assertNotIn("malformed", result["final_response"])
+                    self.assertEqual(len(launches), 1)
+                finally:
+                    agent.close()
+
     def test_real_host_schema_repair_returns_cache_without_vendor_replay(self):
         module = self.profile_module()
         from hea_runtime.client import AGYClient

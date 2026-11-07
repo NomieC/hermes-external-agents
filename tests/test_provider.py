@@ -10,6 +10,18 @@ sys.path.insert(0, str(ROOT))
 
 
 class ProviderTests(unittest.TestCase):
+    def test_timeout_classification_is_terminal_but_not_malformed(self):
+        spec = importlib.util.spec_from_file_location("hea_provider_timeout_test", ROOT / "provider_profile.py")
+        assert spec and spec.loader
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        from hea_runtime.client import ClientError
+        verdict = module.terminal_error(ClientError("AGY run timed out", "timeout"))
+        self.assertEqual(verdict["reason"], "timeout")
+        self.assertFalse(verdict["retryable"])
+        self.assertFalse(verdict["should_fallback"])
+        self.assertFalse(verdict["should_rotate_credential"])
+
     def test_factory_returns_a_terminal_error_client_not_standard_fallback(self):
         spec = importlib.util.spec_from_file_location("hea_provider_test", ROOT / "provider_profile.py")
         assert spec and spec.loader

@@ -40,6 +40,39 @@ class RunnerTests(unittest.TestCase):
             self.assertEqual(json.loads(args_file.read_text()), ["--print", "hello", "--output-format", "stream-json", "--mode", "plan", "--sandbox", "--print-timeout", "180s", "--model", "model-x"])
             self.assertEqual(runner.launch_count, 1)
 
+    def test_empty_schema_uses_prompt_contract_not_unsupported_vendor_flag(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            args_file = root / "args.json"
+            runner = self.make_runner(root,
+                f"open({str(args_file)!r}, 'w').write(json.dumps(sys.argv[1:]))\n" + SUCCESS,
+                json_schema={})
+            runner.run("Return JSON")
+            argv = json.loads(args_file.read_text())
+            self.assertNotIn("--json-schema", argv)
+
+    def test_object_schema_reaches_vendor_argv(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            args_file = root / "args.json"
+            schema = {"type": "object", "properties": {"ok": {"type": "boolean"}}}
+            runner = self.make_runner(root,
+                f"open({str(args_file)!r}, 'w').write(json.dumps(sys.argv[1:]))\n" + SUCCESS,
+                json_schema=schema)
+            runner.run("Return JSON")
+            argv = json.loads(args_file.read_text())
+            self.assertEqual(json.loads(argv[argv.index("--json-schema") + 1]), schema)
+
+    def test_vendor_terminal_timeout_has_timeout_code(self):
+        with tempfile.TemporaryDirectory() as temp:
+            runner = self.make_runner(Path(temp),
+                "print(json.dumps({'event':'result','result':{'status':'ERROR','response':'',"
+                "'finished_reason':'print_timeout','error':'private detail'}}), flush=True)\nsys.exit(3)\n")
+            with self.assertRaises(AGYError) as caught:
+                runner.run("x")
+            self.assertEqual(caught.exception.code, "timeout")
+            self.assertNotIn("private", str(caught.exception))
+
     def test_real_ndjson_newline_is_accepted(self):
         with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as temp:
             root = Path(temp)
@@ -60,6 +93,44 @@ class RunnerTests(unittest.TestCase):
             with self.assertRaisesRegex(AGYError, "timed out"):
                 runner.run("x")
             self.assertLess(time.monotonic() - started, 2)
+
+    def test_timeout_retains_stream_session_and_sanitized_progress(self):
+        cid = "12345678-1234-4234-8234-123456789abc"
+        with tempfile.TemporaryDirectory() as temp:
+            updates = []
+            body = (f"print(json.dumps({{'event':'init','conversation_id':{cid!r}}}), flush=True)\n"
+                    "print(json.dumps({'event':'step_update','step_update':{'step_index':2,"
+                    "'step_type':'tool','state':'completed','text_delta':'private text'}}), flush=True)\n"
+                    "time.sleep(10)\n")
+            runner = self.make_runner(Path(temp), body, timeout_seconds=2,
+                                      event_callback=updates.append)
+            with self.assertRaises(AGYError) as caught:
+                runner.run("private prompt")
+            self.assertEqual(getattr(caught.exception, "code", None), "timeout")
+            self.assertEqual(runner.conversation_id, cid)
+            self.assertEqual(updates[-1]["step_index"], 2)
+            self.assertEqual(updates[-1]["state"], "completed")
+            self.assertNotIn("private", json.dumps(updates))
+            self.assertGreater(runner.duration_seconds, 0)
+
+    def test_progress_drops_unknown_metadata_values(self):
+        with tempfile.TemporaryDirectory() as temp:
+            updates = []
+            runner = self.make_runner(Path(temp),
+                "print(json.dumps({'event':'step_update','step_update':{'step_index':1,"
+                "'step_type':'secretvalue','state':'privatevalue','tool_name':'private-tool'}}), flush=True)\n" + SUCCESS,
+                event_callback=updates.append)
+            runner.run("x")
+            self.assertEqual(updates[0], {"event": "step_update", "conversation_id": None, "step_index": 1})
+
+    def test_inconsistent_conversation_identity_fails(self):
+        with tempfile.TemporaryDirectory() as temp:
+            body = ("print(json.dumps({'event':'init','conversation_id':'12345678-1234-4234-8234-123456789abc'}), flush=True)\n"
+                    "print(json.dumps({'event':'step_update','step_update':{'conversation_id':'22345678-1234-4234-8234-123456789abc'}}), flush=True)\n" + SUCCESS)
+            runner = self.make_runner(Path(temp), body)
+            with self.assertRaises(AGYError) as caught:
+                runner.run("x")
+            self.assertEqual(caught.exception.code, "protocol_error")
 
     def test_output_limit_is_enforced_while_streaming(self):
         with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as temp:
@@ -84,6 +155,13 @@ class RunnerTests(unittest.TestCase):
                 runner = self.make_runner(Path(temp), f"sys.stdout.buffer.write({payload!r})\n")
                 with self.assertRaises(AGYError):
                     runner.run("x")
+
+    def test_truncated_stream_has_protocol_error_code(self):
+        with tempfile.TemporaryDirectory() as temp:
+            runner = self.make_runner(Path(temp), "sys.stdout.write('{\"event\":\"init\"}')\n")
+            with self.assertRaises(AGYError) as caught:
+                runner.run("x")
+            self.assertEqual(caught.exception.code, "protocol_error")
 
     def test_failed_final_result_fails(self):
         with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as temp:

@@ -67,5 +67,32 @@ class ExternalAgentsBackend(DelegationProvider):
                     "hea_workspace": str(Path(workspace).expanduser().resolve()), "hea_settings": settings}}}
 
 
+def setup_cli(parser):
+    commands = parser.add_subparsers(dest="external_agents_action", required=True)
+    status = commands.add_parser("status", help="Read a job's owner-bound local diagnostics; never launch AGY")
+    status.add_argument("--job", required=True)
+    status.add_argument("--session", required=True, help="Exact Hermes child session, not the parent session")
+
+
+def handle_cli(args):
+    import json
+    from providers import get_provider_profile
+    profile = get_provider_profile("external-agents-agy")
+    if profile is None:
+        raise SystemExit("Enable the external-agents-agy registration in this profile first.")
+    client = profile.create_client()
+    if client is None:
+        raise SystemExit("External-agent diagnostic client is unavailable; no execution was attempted.")
+    if not callable(getattr(client, "job_status", None)):
+        client.close()
+        raise SystemExit("External-agent diagnostic client is unavailable; no execution was attempted.")
+    try:
+        print(json.dumps(client.job_status(args.job, args.session), indent=2))
+    finally:
+        client.close()
+
+
 def register(ctx):
     ctx.register_delegation_provider(ExternalAgentsBackend(ctx.get_config))
+    ctx.register_cli_command(name="external-agents", help="Inspect local external-agent jobs",
+                             setup_fn=setup_cli, handler_fn=handle_cli)

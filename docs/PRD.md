@@ -37,7 +37,7 @@ Dashboard, marketplace admission, broad multi-CLI/OS claims, automatic write-tas
 
 ## Current gate outcome
 
-The [compatibility report](COMPATIBILITY.md) preserves the historical direct-takeover audit. The owner subsequently approved a hybrid with a native Hermes child wrapper. Runtime, public backend registration and process-provider registration are implemented. Both plugin registrations pass host validation. A complete real model-issued foreground delegation returned exact independently checked file contents through AGY, with schema_valid=true. Fixture tests cover ownership, replay refusal, cancellation, deadlines, output caps and cleanup, including a descendant that ignores SIGTERM. Live background/control parity and OS containment are not claimed. No live user profile has been activated.
+The [compatibility report](COMPATIBILITY.md) preserves the historical direct-takeover audit. The owner subsequently approved a hybrid with a native Hermes child wrapper. Runtime, public backend registration and process-provider registration are implemented. Both plugin registrations pass host validation. A complete real model-issued foreground delegation returned exact independently checked file contents through AGY, with schema_valid=true. Fixture tests cover ownership, replay refusal, cancellation, deadlines, output caps and cleanup, including a descendant that ignores SIGTERM. Live background/control parity and OS containment are not claimed. These historical isolated checks did not activate the live profile; the owner later installed both published registrations and selected the backend separately. Current local stabilization has not updated those installed copies or changed their execution consent.
 
 ## Release policy
 
