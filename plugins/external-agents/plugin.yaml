@@ -1,0 +1,34 @@
+name: external-agents
+version: 0.1.0
+manifest_version: 2
+api_version: 1
+kind: backend
+author: Fidel Brian Dava
+license: MIT
+homepage: https://github.com/NomieC/hermes-external-agents
+description: "Route ordinary delegate_task to AGY, wrapped by a native Hermes child."
+config_schema:
+  workspace:
+    type: str
+    default: ""
+    description: "Explicit existing working directory. This is not a security sandbox."
+  executable:
+    type: str
+    default: agy
+    description: "AGY executable path; cached vendor login is managed by AGY."
+  mode:
+    type: str
+    default: plan
+    description: "plan or accept-edits. AGY owns tool permissions; Hermes restrictions do not carry over."
+  timeout_seconds:
+    type: int
+    default: 180
+    description: "Hard process deadline, 1 to 3600 seconds."
+  max_output_bytes:
+    type: int
+    default: 4000000
+    description: "Combined stdout/stderr cap, 1024 to 16000000 bytes."
+  allow_external_tools:
+    type: bool
+    default: false
+    description: "Explicit consent: AGY uses its own tools and vendor authentication, outside Hermes tool filtering."

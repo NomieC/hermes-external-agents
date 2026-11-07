@@ -1,0 +1,9 @@
+name: external-agents-agy
+version: 0.1.0
+manifest_version: 2
+api_version: 1
+kind: model-provider
+author: Fidel Brian Dava
+license: MIT
+homepage: https://github.com/NomieC/hermes-external-agents
+description: "In-process AGY protocol client. Not a sandbox or direct primary-chat provider."

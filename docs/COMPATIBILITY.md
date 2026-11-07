@@ -1,8 +1,18 @@
 # Compatibility gate report
 
-## Verdict
+## Current verdict: approved hybrid works
 
-**Transparent replacement of ordinary `delegate_task` is blocked on the audited host.** No public-API-only route was identified that both replaces the native executor and preserves its downstream scope, pre-tool and guardrail checks. This repository does not install a takeover middleware or claim that standalone tools satisfy this requirement.
+**An actual model-issued foreground `delegate_task` has completed through a native Hermes child wrapper and AGY's own agent loop.** The child returned the exact unknown file contents; its native delegation result reported `completed`, provider `external-agents-agy`, one child API call and `schema_valid=true`. The first accepted run took about 189 seconds in the external child. A repeat from a fresh disposable home, using the production executable directly and the hardened supervisor, passed in 36.323 seconds with exactly one completed job record. The parent's final paraphrase was not used as the acceptance oracle.
+
+The implementation uses public delegation-provider and external-process model-provider APIs. It does not override tools, short-circuit execution middleware or patch Hermes core. The source host remains at its original clean revision. The live user's default and unrelated profiles have not been activated or changed by these tests.
+
+Both generated plugin registrations pass `hermes plugins validate --json`, with no validation warnings. Two host contract probes also pass: client-construction failure is terminal under a real AIAgent, and the real host's schema-repair turn returns the cache without launching the vendor again. Two registration tests pass, including an HTTP request to the routing endpoint used by the Subagents picker. The actual desktop UI was not clicked or visually asserted. Isolated AIAgent probes emitted a bundled dashboard-auth configuration warning and, in some runs, a host subprocess ResourceWarning; passing assertions are not described as warning-free host startup. The backend is host-ready according to validation; the custom client requires **in-process** loading. Do not describe that as plugin isolation or a security sandbox.
+
+Automated fixture/contract coverage includes durable replay refusal, result caching, session binding, settings propagation, terminal-policy refusal, malformed output, output caps, timeout, cancellation and process-group cleanup. Test commands and live opt-ins are in the README. Counts may increase during hardening; use actual suite output, not this document, as the source of the current count.
+
+## Historical direct-executor audit
+
+**Pure replacement of the native executor remains blocked on the audited host.** No public-API-only takeover route was identified that both replaces the executor and preserves its downstream scope, pre-tool and guardrail checks. The owner subsequently accepted a Hermes child wrapper. That supported hybrid is a different design, not a workaround that bypasses those checks.
 
 This is an integration-contract finding, not a claim of an OS sandbox escape or a Hermes security vulnerability. Hermes explicitly treats installed plugins as trusted code with full agent privileges. See [the host security policy](https://github.com/NousResearch/hermes-agent/blob/088f657ecf77674c7b8e2ededf4e3576d82e042c/SECURITY.md#25-plugin-trust-model).
 
@@ -100,6 +110,12 @@ An earlier parent smoke incorrectly looked for a `type` discriminator. Its valid
 
 That earlier invocation also combined `--disable-slash-commands` with `--mode plan`. AGY warned: `--mode plan has no effect while slash command expansion is disabled.` The accepted repeat removed `--disable-slash-commands`; no permission-bypass option was used. An adapter must verify effective mode rather than treating requested flags as evidence of policy enforcement.
 
+## Release audit follow-up
+
+The read-only audit found that an exited AGY leader could leave owned descendants alive in its inspected snapshot. The current supervisor observes exit without reaping, sends bounded TERM/KILL signals to the owned group before reaping, and passes a regression where the leader reports success while its child ignores TERM. This does not contain intentionally detached processes.
+
+The cache now re-applies owner-only POSIX modes to existing plugin data directories and database files; a regression preserves the stored response while tightening previously permissive modes. Prompt contents remain CLI arguments visible to local process inspection, and retained `HOME` allows the vendor CLI to use its own supported cached login. These trust-boundary limitations are documented rather than presented as sandbox guarantees.
+
 ## Release gate status
 
 | Gate | Status |
@@ -107,15 +123,19 @@ That earlier invocation also combined `--disable-slash-commands` with `--mode pl
 | Public source repository and English requirements | Published |
 | Host middleware behavior | Reproduced with 8 characterization tests |
 | Real AGY no-tools prompt/response | Verified independently |
-| Authorization-preserving default delegation replacement | Blocked |
-| Installable product plugin | Not implemented |
-| Worker ownership, timeout/cancel races, recovery | Not verified |
-| Real delegated file artifact | Not verified |
-| Catalog admission or release | Not requested or claimed |
+| Pure executor takeover | Blocked, no longer required for the approved milestone |
+| Native child wrapper + real AGY loop | Verified by model-issued foreground delegation |
+| Installable registrations | Implemented; both pass host validation |
+| Worker identity, replay, timeout and cancellation | Automated fixture/contract tests; no live AGY stop parity claim |
+| Real delegated file read | Exact child contents independently matched |
+| Real AGY file write | Verified by separate live artifact probe: exact file contents, one launch, 20.573s |
+| Background completion, steering and resume | Not live-verified; not supported claims |
+| Catalog admission or tagged release | Not requested or claimed |
 
-## Decision required before implementation continues
+## Accepted direction and remaining boundaries
 
-1. Preserve the original requirement: pursue a supported post-authorization executor extension upstream, then ship the adapter entirely as a plugin. This requires host support that has not been established; no local core patch is proposed.
-2. Explicitly narrow the first release to standalone external-agent tools using ordinary plugin dispatch. This can remain plugin-only but is **not** a transparent replacement for native `delegate_task`.
+The owner approved native Hermes child wrapping. The plugin therefore uses public routing and process-provider interfaces, not standalone replacement tools or takeover middleware. No upstream issue, pull request or security disclosure has been submitted.
 
-Neither option is silently selected. No upstream issue, pull request or security disclosure has been submitted by this project.
+Schema correction must not relaunch AGY. A completed job returns cached text; if that text fails a schema, the failure is returned instead of repeating mutations. The launch fence is scoped to a routed job token and child session, not a global deduplication service. Separate delegations are separate jobs.
+
+Hermes reports vendor cost as unknown in the live result even though its token and USD placeholders are zero. Those placeholders must not be interpreted as actual AGY usage accounting. Live AGY cancellation, detached completion, native interactive approvals and OS containment remain unverified. The configured workspace is not confinement, and process-group supervision cannot contain a process that intentionally detaches.
