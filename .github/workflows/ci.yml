@@ -19,9 +19,6 @@ jobs:
         python: ["3.14"]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
-    env:
-      TMPDIR: ${{ runner.temp }}
-      HERMES_HOME: ${{ runner.temp }}/hea-fixture-home
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -35,6 +32,9 @@ jobs:
           git diff --exit-code -- plugins/
           git diff --check
       - name: Run standard-library fixtures (no Hermes or vendor calls)
+        env:
+          TMPDIR: ${{ runner.temp }}
+          HERMES_HOME: ${{ runner.temp }}/hea-fixture-home
         run: |
           python -m unittest discover -s tests -p test_client.py -v
           python -m unittest discover -s tests -p test_runner.py -v
